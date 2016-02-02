@@ -1,3 +1,5 @@
+# Author: jbr
+#
 # This code is an operator precedence parser which uses an operator table and a variation 
 # on the shunting yard parser algorithm to convert an infix expression to a series of 
 # prefix operator callbacks.

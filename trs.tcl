@@ -173,9 +173,14 @@ add_rule {deriv y y}                           -> 1
 add_rule {deriv {mul term_1 term_2}}           -> {add {mul {deriv term_1} term_2} {mul term_1 {deriv term_2}}}
 add_rule {deriv const_1 y}                     -> 0
 
-## multiplicative identity
+## identity
 add_rule {mul term_1 1}                        -> term_1
 add_rule {mul atom_1 1}                        -> atom_1
+add_rule {pow y 1}                             -> y
+add_rule {add term_1 0}                        -> term_1
+add_rule {add y 0}                             -> y
+add_rule {sub term_1 0}                        -> term_1
+add_rule {sub y 0}                             -> y
 
 ## multiplicative associativity
 add_rule {mul const_1 {mul const_2 term_1}}    -> {mul [expr {const_1 * const_2}] term_1}
