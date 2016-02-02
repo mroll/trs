@@ -54,10 +54,9 @@ proc recurse_reduce { term rules lvl } {
     set term
 }
 
-proc operator? { term } {
-    set operators { add mul div sub pow deriv cos sin }
-    regexp [join [lmap op $operators {subst {^$op\$}}] |] $term
-}
+
+set  operators { add mul div sub pow deriv cos sin }
+proc operator? { term } { regexp [join [lmap op $::operators {subst {^$op\$}}] |] $term }
 
 proc union { a b } {
     set u {}
@@ -68,7 +67,19 @@ proc union { a b } {
     set u
 }
 
-proc regexp_cmd { redex contractum vars lvl } {
+proc makevar { v i } { join [list $v $i] _ }
+
+proc group { v } {
+    switch -regexp -- $v {
+        {^const_\d+$} { return {(\d+|\d+\.\d+)} }
+        {^term_\d+$}  { return {({.*})} }
+        {^\w+$}       { return (\[a-zA-Z0-9\]+) }
+    }
+}
+
+proc var? { v } { regexp {\w+} $v }
+
+proc make_regex { redex contractum vars lvl } {
     set regex $redex
     set groups {}
 
@@ -78,26 +89,23 @@ proc regexp_cmd { redex contractum vars lvl } {
             lset regex $i %s
             lappend groups $t
         } elseif { [term? $t] } {
-            set drill [regexp_cmd $t $contractum $vars [expr {$lvl + 1}]]
+            set drill [make_regex $t $contractum $vars [expr {$lvl + 1}]]
             lset regex $i [lindex $drill 0]
             set vars [union $vars [lindex $drill 1]]
-        } elseif { [regexp {^term_\d+} $t] } {
+        } elseif { [var?  $t] } {
             lset regex $i %s
-            lappend groups {({.*})}
-            lappend vars $t
-        } elseif { [regexp {^const_\d+} $t] } {
-            lset regex $i %s
-            lappend groups {(\d+|\d+\.\d+)}
-            lappend vars $t
-        } elseif { [regexp {^\w+$} $t] }  {
-            lset regex $i %s
-            set exists [lsearch $vars $t]
+            set  exists [lsearch $vars $t]
+
+            # exists will be index+1 of the var in vars, or -1 if not found.
+            # If it exists, set the group to be the backtrack expr of the existing
+            # var.
+            #
             if { $exists != -1 } {
                 lappend groups "\\[expr {$exists+1}]"
-                lappend vars [join [list $t $i] _]
+                lappend vars   [makevar $t $i]
             } else {
-                lappend groups (\[a-zA-Z\]+)
-                lappend vars $t
+                lappend groups [group $t]
+                lappend vars   $t
             }
         }
     }
@@ -107,10 +115,13 @@ proc regexp_cmd { redex contractum vars lvl } {
     } else {
         set pattern [format "$regex" {*}$groups]
     }
+
     list $pattern $vars
 }
 
-proc mapper { varnames } {
+# return a mapping to pass to [string map] that will turn plain
+# variable names into dollar references.
+proc dollarize { varnames } {
     set pairs {}
     foreach name $varnames {
         lappend pairs $name
@@ -121,13 +132,23 @@ proc mapper { varnames } {
 }
 
 proc rule { redex -> contractum } {
-    unpack [regexp_cmd $redex $contractum {} 1] regex vars
+    lassign [make_regex $redex $contractum {} 1] regex vars
+    subst -nocommands { [regexp {$regex} \$term __r__ $vars] }
 
-    return [subst { { term } {
-                set match \[regexp {$regex} \$term __r__ $vars\]
-                if { \$match } { subst {[string map [mapper $vars] $contractum]} }
-               } }]
+    subst { { term } {
+            set match [subst -nocommands { [regexp {$regex} \$term __r__ $vars] }]
+            if { \$match } { subst {[string map [dollarize $vars] $contractum]} }
+           } }
 }
+
+# proc rule { redex -> contractum } {
+#     unpack [regexp_cmd $redex $contractum {} 1] regex vars
+# 
+#     return [subst { { term } {
+#                 set match \[regexp {$regex} \$term __r__ $vars\]
+#                 if { \$match } { subst {[string map [mapper $vars] $contractum]} }
+#                } }]
+# }
 
 proc simplify { term rules } {
     set old $term
@@ -150,7 +171,6 @@ add_rule {add const_1 const_2}                 -> {[expr {1.0 * const_1 + const_
 add_rule {mul const_1 const_2}                 -> {[expr {const_1 * const_2 * 1.0}]}
 add_rule {pow const_1 const_2}                 -> {[expr {pow(const_1, const_2) * 1.0}]}
 add_rule {deriv {pow y const_1}}               -> {mul const_1 {pow y [expr {const_1 - 1}]}}
-add_rule {div const_1 const_2}                 -> {[expr {1.0 * const_1 / const_2}]}
 add_rule {mul const_1 {mul const_2 term_1}}    -> {mul [expr {const_1 * const_2}] term_1}
 add_rule {mul {pow y const_1} {pow y const_2}} -> {pow y [expr {const_1 + const_2}]}
 add_rule {deriv {mul term_1 term_2}}           -> {add {mul {deriv term_1} term_2} {mul term_1 {deriv term_2}}}
@@ -166,6 +186,8 @@ add_rule {mul z {mul term_1 z}}                -> {mul {pow z 2} term_1}
 add_rule {mul {mul term_1 z} z}                -> {mul {pow z 2} term_1}
 add_rule {mul {mul const_1 y} y}               -> {mul {pow y 2} const_1}
 add_rule {mul {pow y const_1} {mul const_2 y}} -> {mul {pow y [expr {const_1 + 1.0}]} const_2}
+add_rule {mul const_1 {mul const_2 y}}         -> {mul [expr {const_1 * const_2}] y}
+add_rule {mul term_1 1}                        -> term_1
 
 proc prompt { msg } {
     puts -nonewline $msg
@@ -194,6 +216,5 @@ proc interact { } {
     }
 }
 
-simplify {deriv {sin matt}} $rules
 
-# interact
+interact
