@@ -128,7 +128,7 @@ proc rule { redex -> contractum } {
     lassign [make_regex $redex $contractum {} 1] regex vars
 
     subst { { term } {
-            set match [subst -nocommands { [regexp {$regex} \$term __r__ $vars] }]
+            set match \[regexp {$regex} \$term __r__ $vars\]
             if { \$match } { subst {[string map [dollarize $vars] $contractum]} }
            } }
 }
