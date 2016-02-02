@@ -8,17 +8,6 @@ proc forindex { i list body } {
     uplevel $script
 }
 
-proc unpack { vals args } {
-    set script {}
-    forindex i $vals {
-        lappend script [list set [lindex $args $i] [lindex $vals $i]]
-    }
-
-    uplevel [join $script "; "]
-}
-
-proc term? { expr } { expr { [llength $expr] > 1 } }
-
 proc reduce { term rules } {
     foreach rule $rules {
         set contractum [apply $rule $term]
@@ -55,9 +44,6 @@ proc recurse_reduce { term rules lvl } {
 }
 
 
-set  operators { add mul div sub pow deriv cos sin }
-proc operator? { term } { regexp [join [lmap op $::operators {subst {^$op\$}}] |] $term }
-
 proc union { a b } {
     set u {}
     foreach el [concat $a $b] {
@@ -70,14 +56,18 @@ proc union { a b } {
 proc makevar { v i } { join [list $v $i] _ }
 
 proc group { v } {
-    switch -regexp -- $v {
+    switch -regexp -matchvar m -- $v {
         {^const_\d+$} { return {(\d+|\d+\.\d+)} }
         {^term_\d+$}  { return {({.*})} }
-        {^\w+$}       { return (\[a-zA-Z0-9\]+) }
+        {^[a-zA-Z]+$}       { return (\[a-zA-Z\]+) }
     }
 }
 
-proc var? { v } { regexp {\w+} $v }
+set  operators { add mul div sub pow deriv cos sin }
+proc operator? { term } { regexp [join [lmap op $::operators {subst {^$op\$}}] |] $term }
+proc term?     { expr } { expr { [llength $expr] > 1 } }
+proc var?      { v }    { regexp {^\w+$}    $v }
+proc constant? { v }    { regexp {^[0-9]+$} $v }
 
 proc make_regex { redex contractum vars lvl } {
     set regex $redex
@@ -92,6 +82,9 @@ proc make_regex { redex contractum vars lvl } {
             set drill [make_regex $t $contractum $vars [expr {$lvl + 1}]]
             lset regex $i [lindex $drill 0]
             set vars [union $vars [lindex $drill 1]]
+        } elseif { [constant? $t] } {
+            lset regex $i %s
+            lappend groups $t
         } elseif { [var?  $t] } {
             lset regex $i %s
             set  exists [lsearch $vars $t]
@@ -133,22 +126,12 @@ proc dollarize { varnames } {
 
 proc rule { redex -> contractum } {
     lassign [make_regex $redex $contractum {} 1] regex vars
-    subst -nocommands { [regexp {$regex} \$term __r__ $vars] }
 
     subst { { term } {
             set match [subst -nocommands { [regexp {$regex} \$term __r__ $vars] }]
             if { \$match } { subst {[string map [dollarize $vars] $contractum]} }
            } }
 }
-
-# proc rule { redex -> contractum } {
-#     unpack [regexp_cmd $redex $contractum {} 1] regex vars
-# 
-#     return [subst { { term } {
-#                 set match \[regexp {$regex} \$term __r__ $vars\]
-#                 if { \$match } { subst {[string map [mapper $vars] $contractum]} }
-#                } }]
-# }
 
 proc simplify { term rules } {
     set old $term
@@ -172,7 +155,7 @@ add_rule {mul const_1 const_2}                 -> {[expr {const_1 * const_2 * 1.
 add_rule {pow const_1 const_2}                 -> {[expr {pow(const_1, const_2) * 1.0}]}
 add_rule {deriv {pow y const_1}}               -> {mul const_1 {pow y [expr {const_1 - 1}]}}
 add_rule {mul const_1 {mul const_2 term_1}}    -> {mul [expr {const_1 * const_2}] term_1}
-add_rule {mul {pow y const_1} {pow y const_2}} -> {pow y [expr {const_1 + const_2}]}
+add_rule {mul {pow y const_1} {pow y const_1}} -> {pow y [expr {const_1 + const_1}]}
 add_rule {deriv {mul term_1 term_2}}           -> {add {mul {deriv term_1} term_2} {mul term_1 {deriv term_2}}}
 add_rule {deriv {sin y}}                       -> {cos y}
 add_rule {deriv {cos y}}                       -> {mul -1 {sin y}}
@@ -196,8 +179,7 @@ proc prompt { msg } {
 }
 
 proc valid { expression } { expr { ! [string equal $expression ""] } }
-
-proc ident { args } { set args }
+proc ident { args }       { set args }
 
 # Process the operator table to create the string map table that suffices
 # for the lexical analyzer.
@@ -215,6 +197,5 @@ proc interact { } {
         set input [prompt "> "]
     }
 }
-
 
 interact
