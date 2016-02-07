@@ -11,7 +11,7 @@ proc forindex { i list body } {
 proc reduce { term rules } {
     foreach rule $rules {
         set contractum [apply $rule $term]
-        if { [string length $contractum] } {
+        if { $contractum ne "" } {
             return $contractum
         }
     }
@@ -57,17 +57,19 @@ proc newvar { v i } { join [list $v $i] _ }
 
 proc group { v } {
     switch -regexp -matchvar m -- $v {
-        {^const_\d+$} { return {(\d+|\d+\.\d+)} }
-        {^term_\d+$}  { return {({.*})} }
-        {^atom_\d+$}  { return (\[a-zA-Z0-9\]+) }
+        {^__c\d+$}     { return {(\d+|\d+\.\d+)} }
+        {^__t\d+$}     { return {({.*})} }
+        {^__a\d+$}     { return (\[a-zA-Z0-9\]+) }
+        {^__f\d+$}     { return ([join $::functions |]) }
         {^[a-zA-Z]+$} { return (\[a-zA-Z\]+) }
     }
 }
 
+set  functions { cos sin }
 set  operators { add mul div sub pow diff cos sin }
 proc operator? { v } { regexp [join [lmap op $::operators {subst {^$op\$}}] |] $v }
 proc term?     { v } { expr { [llength $v] > 1 } }
-proc var?      { v } { regexp {^\w+$}    $v }
+proc var?      { v } { regexp {^(?:__)?\w+$}   $v }
 proc constant? { v } { regexp {^[0-9]+$} $v }
 
 proc make_regex { redex vars lvl } {
@@ -139,7 +141,7 @@ proc simplify { term rules } {
     set old $term
     set new [recurse_reduce $term $rules 1]
 
-    while { ! [string equal $old $new] } {
+    while { $old ne $new } {
         set old $new
         set new [recurse_reduce $new $rules 1]
     }
@@ -147,55 +149,12 @@ proc simplify { term rules } {
     set new
 }
 
-proc add_rule { redex -> contractum } {
-    uplevel [subst -nocommands { lappend rules [rule {$redex} -> {$contractum}] }]
+proc fprime { term } {
+    switch [lindex $term 0] {
+        cos { return [subst { {mul -1 {sin [lindex $term 1]}} }] }
+        sin { return [subst { {cos [lindex $term 1]} }] }
+    }
 }
-
-set rules {}
-
-## constant add, sub, mul, pow (no division yet, just to avoid long floating points)
-add_rule {add const_1 const_2}                 -> {[expr {const_1 + const_2}]}
-add_rule {mul const_1 const_2}                 -> {[expr {const_1 * const_2}]}
-add_rule {sub const_1 const_2}                 -> {[expr {const_1 - const_2}]}
-add_rule {pow const_1 const_2}                 -> {[expr {pow(const_1, const_2)}]}
-
-## simple variable rules
-add_rule {div y y}                             -> 1
-add_rule {mul y y}                             -> {pow y 2}
-add_rule {mul {pow y const_1} {pow y const_2}} -> {pow y [expr {const_1 + const_2}]}
-
-## simple derivative rules
-add_rule {diff {sin y} y}                     -> {cos y}
-add_rule {diff {cos y} y}                     -> {mul -1 {sin y}}
-add_rule {diff {pow y const_1} y}             -> {mul const_1 {pow y [expr {const_1 - 1}]}}
-add_rule {diff {add atom_1 atom_2} y}         -> {add {diff atom_1 y} {diff atom_2 y}}
-add_rule {diff y y}                           -> 1
-add_rule {diff {mul term_1 term_2} y}           -> {add {mul {diff term_1 y} term_2} {mul term_1 {diff term_2 y}}}
-add_rule {diff const_1 y}                     -> 0
-
-## identity
-add_rule {mul term_1 1}                        -> term_1
-add_rule {mul atom_1 1}                        -> atom_1
-add_rule {pow y 1}                             -> y
-add_rule {add term_1 0}                        -> term_1
-add_rule {add y 0}                             -> y
-add_rule {sub term_1 0}                        -> term_1
-add_rule {sub y 0}                             -> y
-
-## multiplicative associativity
-add_rule {mul const_1 {mul const_2 term_1}}    -> {mul [expr {const_1 * const_2}] term_1}
-add_rule {mul const_1 {mul const_2 y}}         -> {mul [expr {const_1 * const_2}] y}
-add_rule {mul z {mul y z}}                     -> {mul {pow y 2} z}
-add_rule {mul {mul y z} y}                     -> {mul {pow y 2} z}
-add_rule {mul y {pow y const_1}}               -> {pow y [expr {const_1 + 1}]}
-add_rule {mul z {mul z term_1}}                -> {mul {pow z 2} term_1}
-add_rule {mul {mul const_1 y} y}               -> {mul {pow y 2} const_1}
-add_rule {mul {pow y const_1} {mul const_2 y}} -> {mul {pow y [expr {const_1 + 1}]} const_2}
-add_rule {div {mul const_1 y} {mul const_2 z}} -> {mul {div const_1 const_2} {div y z}}
-
-## move constants to the front
-add_rule {mul y const_1}                       -> {mul const_1 y}
-add_rule {add y const_1}                       -> {add const_1 y}
 
 proc prompt { msg } {
     puts -nonewline $msg
@@ -206,10 +165,19 @@ proc prompt { msg } {
 proc valid { expression } { expr { ! [string equal $expression ""] } }
 proc ident { args }       { set args }
 
+set rules {}
+
 # Process the operator table to create the string map table that suffices
 # for the lexical analyzer.
 #
 set tokens [expression::prep-tokens $expression::optable]
+
+proc add_rule { redex -> contractum } {
+    set redex_tree [expression::parse $redex $::tokens $expression::optable ident]
+    set contractum_tree [expression::parse $contractum $::tokens $expression::optable ident]
+
+    uplevel [subst -nocommands { lappend rules [rule {$redex_tree} -> {$contractum_tree}] }]
+}
 
 proc interact { } {
     set input [prompt "> "]
@@ -222,5 +190,50 @@ proc interact { } {
         set input [prompt "> "]
     }
 }
+
+proc numsonly? { args } {
+    # puts $args
+    foreach x $args {
+        if { ! [string is digit $x] } { return 0 }
+    }
+    return 1
+}
+
+proc guard { args } {
+    set guarded ""
+    foreach el $args {
+        if { [string is list $el] } {
+            lappend guarded [list $el]
+        } else {
+            lappend guarded $el
+        }
+    }
+
+    return $guarded
+}
+
+proc parse { term } { expression::parse $term $::tokens $expression::optable ident }
+
+
+add_rule {x / x}                -> 1
+add_rule {x * x**__c1}          -> {x**(__c1 + 1)}
+add_rule {x**__c1 * x**__c2}    -> {x**(__c1 + __c2)}
+add_rule {x * x}                -> {x**2}
+add_rule {diff(sin(x), x)}      -> {cos(x)}
+add_rule {diff(cos(x), x)}      -> {-1 * sin(x)}
+add_rule {diff(x**__c1, x)}     -> {__c1 * x**(__c1 - 1)}
+add_rule {diff(__c1, y)}        -> 0
+add_rule {diff(__a1 + __a2, x)} -> {diff(__a1, x) + diff(__a2, x)}
+add_rule {diff(x, x)}           -> 1
+add_rule {diff(__t1 * __t2, y)} -> {diff(__t1, y)*__t2 + diff(__t2, y)*__t1}
+
+set term "diff((y+1) * (x+2), y)"
+# puts $term
+
+set parsed [parse $term]
+# puts $parsed
+
+set tree [simplify $parsed $rules]
+puts $tree
 
 # interact

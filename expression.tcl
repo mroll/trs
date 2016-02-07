@@ -160,6 +160,7 @@ namespace eval expression {
        try {
            while { [llength $input] } {
                set tok [pull input]
+               # puts "got tok: $tok"
 
                if { $tok eq ";" } {
                    while { [top operator] ne {} } {
@@ -217,6 +218,8 @@ namespace eval expression {
                            push operands [{*}$prefix [name [set op [pop operator]]] {*}[pop operands [arity $op]]]
                        }
                        pop operator
+
+                       # puts "pop one"
                        pop parens
                     }
                     default {                                                                ; # Function call, Index or comma
@@ -226,8 +229,10 @@ namespace eval expression {
                            push operands [{*}$prefix [name [set op [pop operator]]] {*}[pop operands [arity $op]]]
                        }
                        if { $tok eq ")" || $tok eq "]" } {                                ; # Output function call or Index
+                           # puts "pops three and four"
                            push operands [{*}$prefix [name [pop operator]] {*}[pop operands [expr [pop parens]+1]]]
-                           pop  parens
+                           # pop  parens
+                           # puts "parens: $parens"
                        }
                     }
                    }
