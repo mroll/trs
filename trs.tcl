@@ -58,15 +58,15 @@ proc newvar { v i } { join [list $v $i] _ }
 proc group { v } {
     switch -regexp -matchvar m -- $v {
         {^__c\d+$}     { return {(\d+|\d+\.\d+)} }
-        {^__t\d+$}     { return {({.*})} }
+        {^__t\d+$}     { return {({.*}|(?:\d+|\d+\.\d+)|\[a-zA-Z0-9\]+)} }
         {^__a\d+$}     { return (\[a-zA-Z0-9\]+) }
         {^__f\d+$}     { return ([join $::functions |]) }
-        {^[a-zA-Z]+$} { return (\[a-zA-Z\]+) }
+        {^[a-zA-Z]+$}  { return (\[a-zA-Z\]+) }
     }
 }
 
-set  functions { cos sin }
-set  operators { add mul div sub pow diff cos sin }
+# set  functions { cos sin }
+set  operators { add mul div sub pow diff cos sin call }
 proc operator? { v } { regexp [join [lmap op $::operators {subst {^$op\$}}] |] $v }
 proc term?     { v } { expr { [llength $v] > 1 } }
 proc var?      { v } { regexp {^(?:__)?\w+$}   $v }
@@ -184,15 +184,14 @@ proc interact { } {
     while { ! [string equal $input quit] } {
         set term [expression::parse $input $::tokens $expression::optable ident]
         if { [valid $term] } {
-            puts "expression tree: $term"
-            puts [simplify $term $::rules]
+            # puts "expression tree: $term"
+            puts [totally_reduce $term]
         }
         set input [prompt "> "]
     }
 }
 
 proc numsonly? { args } {
-    # puts $args
     foreach x $args {
         if { ! [string is digit $x] } { return 0 }
     }
@@ -214,26 +213,133 @@ proc guard { args } {
 
 proc parse { term } { expression::parse $term $::tokens $expression::optable ident }
 
+proc cmd? { x } {
+    expr { [lsearch [namespace inscope evaluate { info procs }] $x] != -1 }
+}
 
-add_rule {x / x}                -> 1
-add_rule {x * x**__c1}          -> {x**(__c1 + 1)}
-add_rule {x**__c1 * x**__c2}    -> {x**(__c1 + __c2)}
-add_rule {x * x}                -> {x**2}
-add_rule {diff(sin(x), x)}      -> {cos(x)}
-add_rule {diff(cos(x), x)}      -> {-1 * sin(x)}
-add_rule {diff(x**__c1, x)}     -> {__c1 * x**(__c1 - 1)}
-add_rule {diff(__c1, y)}        -> 0
-add_rule {diff(__a1 + __a2, x)} -> {diff(__a1, x) + diff(__a2, x)}
-add_rule {diff(x, x)}           -> 1
-add_rule {diff(__t1 * __t2, y)} -> {diff(__t1, y)*__t2 + diff(__t2, y)*__t1}
+proc cmds-only? { args } {
+    # puts $args
+    foreach cmd $args {
+        if { [llength $cmd] > 1 } { set test [lindex $cmd 0]
+        } else { set test $cmd }
 
-set term "diff((y+1) * (x+2), y)"
-# puts $term
+        if { ! [cmd? $test] } { return 0 }
+    }
+    return 1
+}
 
-set parsed [parse $term]
-# puts $parsed
+namespace eval evaluate {
+    proc add { t1 t2 } {
+        if { [numsonly? $t1 $t2] } { expr { $t1 + $t2 }
+        } else { return "[eval $t1] + [eval $t2]" }
+    }
 
-set tree [simplify $parsed $rules]
-puts $tree
+    proc sub { t1 t2 } {
+        if { [numsonly? $t1 $t2] } { expr { $t1 - $t2 }
+        } else { return "[eval $t1] - [eval $t2]" }
+    }
+
+    proc usub { t } {
+        if { [numsonly? $t] } { expr { -$t }
+        } else { return "-$t" }
+    }
+
+    proc mul { t1 t2 } {
+        if { [numsonly? $t1 $t2] } { expr { $t1 * $t2 }
+        } else { return "[eval $t1] * [eval $t2]" }
+    }
+
+    proc div { t1 t2 } {
+        if { [numsonly? $t1 $t2] } { expr { $t1 / $t2 }
+        } else { return "[eval $t1] / [eval $t2]" }
+    }
+
+    proc pow { base power } {
+        if { [numsonly? $base $power] } { expr { pow($base, $power) }
+        } else { return "[eval $base]**[eval $power]" }
+    }
+
+    proc cos { exp } {
+        if { [numsonly? $exp] } { expr { cos($exp) }
+        } else { return "cos($exp)" }
+    }
+
+    proc sin { exp } {
+        if { [numsonly? $exp] } { expr { sin($exp) }
+        } else { return "sin($exp)" }
+    }
+
+    proc diff { exp var } {
+        if { [cmds-only? $exp] } { return "diff([{*}$exp], $var)"
+        } else { return "diff($exp, $var)" }
+    }
+
+    proc reduce2 { t1 t2 op } {
+        if { [numsonly? $t1 $t2] } { expr { $t1 $op $t2 }
+        } else { return "[eval $t1] $op [eval $t2]" }
+    }
+
+    proc eval { term } {
+        if { [cmds-only? $term] } { {*}$term
+        } else { return $term }
+    }
+
+    proc call { args } { {*}$args }
+}
+
+proc eval-exp { exp } {
+    if { [cmds-only? $exp] } {
+        namespace inscope evaluate $exp
+    } else {
+        return $exp
+    }
+}
+
+proc totally_reduce { term } {
+    set old $term
+    set new [simplify [parse [eval-exp $term]] $::rules]
+
+    while { $new ne $old } {
+        set old $new
+        set new [parse [eval-exp $new]]
+        if { [cmds-only? $new] } {
+            set new [simplify $new $::rules]
+        }
+    }
+
+    if { [cmds-only? $new] } {
+        return [eval-exp $new]
+    } else {
+        return $new
+    }
+}
+
+ 
+add_rule {(__c1 * x) + (__c2 * x)}      -> {(__c1 + __c2) * x}
+add_rule {(__c1 * x) - (__c2 * x)}      -> {(__c1 - __c2) * x}
+add_rule {__c1 * (__t1 + __t2)}         -> {__c1 * __t1 + __c1 * __t2}
+add_rule {__c1 * (__t1 - __t2)}         -> {__c1 * __t1 - __c1 * __t2}
+add_rule {x / x}                        -> 1
+add_rule {x * x**__c1}                  -> {x**(__c1 + 1)}
+add_rule {x**__c1 * x**__c2}            -> {x**(__c1 + __c2)}
+add_rule {x * x}                        -> {x**2}
+add_rule {__t1 * 0}                     -> 0
+add_rule {0 * __t1}                     -> 0
+add_rule {diff(sin(x), x)}              -> {cos(x)}
+add_rule {diff(cos(x), x)}              -> {-1 * sin(x)}
+add_rule {diff(x**__c1, x)}             -> {__c1 * x**(__c1 - 1)}
+add_rule {diff(__c1, y)}                -> 0
+add_rule {diff(__a1 + __a2, x)}         -> {diff(__a1, x) + diff(__a2, x)}
+add_rule {diff(__a1 - __a2, x)}         -> {diff(__a1, x) - diff(__a2, x)}
+add_rule {diff(__t1 + __t2, x)}         -> {diff(__t1, x) + diff(__t2, x)}
+add_rule {diff(__t1 - __t2, x)}         -> {diff(__t1, x) - diff(__t2, x)}
+add_rule {diff(x, x)}                   -> 1
+add_rule {diff(__c1 * x, x)}            -> __c1
+add_rule {diff(x * __c1, x)}            -> __c1
+add_rule {diff(__c1 * x**__c2, x)}      -> {__c1 * __c2 * x**(__c2 - 1)}
+add_rule {0 + __t1}                     -> __t1
+add_rule {0 - __t1}                     -> {-1 * (__t1)}
+add_rule {diff(__a1 * __a2, y)}         -> {diff(__a1, y) * __a2 + __a1 * diff(__a2, y)}
+
 
 # interact
