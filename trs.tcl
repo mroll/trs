@@ -172,7 +172,19 @@ set rules {}
 #
 set tokens [expression::prep-tokens $expression::optable]
 
-proc add_rule { redex -> contractum } {
+# proc add_rule { redex -> contractum } {
+#     set redex_tree [expression::parse $redex $::tokens $expression::optable ident]
+#     set contractum_tree [expression::parse $contractum $::tokens $expression::optable ident]
+# 
+#     uplevel [subst -nocommands { lappend rules [rule {$redex_tree} -> {$contractum_tree}] }]
+# }
+
+proc add_rule { args } {
+    set fields [lmap x [split $args ->] { concat $x }]
+    if { [llength $fields] ne 3 } { return }
+
+    foreach { redex -> contractum } $fields { }
+
     set redex_tree [expression::parse $redex $::tokens $expression::optable ident]
     set contractum_tree [expression::parse $contractum $::tokens $expression::optable ident]
 
@@ -229,29 +241,14 @@ proc cmds-only? { args } {
 }
 
 namespace eval evaluate {
-    proc add { t1 t2 } {
-        if { [numsonly? $t1 $t2] } { expr { $t1 + $t2 }
-        } else { return "[eval $t1] + [eval $t2]" }
-    }
-
-    proc sub { t1 t2 } {
-        if { [numsonly? $t1 $t2] } { expr { $t1 - $t2 }
-        } else { return "[eval $t1] - [eval $t2]" }
-    }
+    proc add { t1 t2 } { reduce2 $t1 $t2 + }
+    proc sub { t1 t2 } { reduce2 $t1 $t2 - }
+    proc mul { t1 t2 } { reduce2 $t1 $t2 * }
+    proc div { t1 t2 } { reduce2 $t1 $t2 / }
 
     proc usub { t } {
         if { [numsonly? $t] } { expr { -$t }
         } else { return "-$t" }
-    }
-
-    proc mul { t1 t2 } {
-        if { [numsonly? $t1 $t2] } { expr { $t1 * $t2 }
-        } else { return "[eval $t1] * [eval $t2]" }
-    }
-
-    proc div { t1 t2 } {
-        if { [numsonly? $t1 $t2] } { expr { $t1 / $t2 }
-        } else { return "[eval $t1] / [eval $t2]" }
     }
 
     proc pow { base power } {
@@ -275,7 +272,7 @@ namespace eval evaluate {
     }
 
     proc reduce2 { t1 t2 op } {
-        if { [numsonly? $t1 $t2] } { expr { $t1 $op $t2 }
+        if { [numsonly? $t1 $t2] } { {*}[subst {expr { $t1 $op $t2 }}]
         } else { return "[eval $t1] $op [eval $t2]" }
     }
 
@@ -315,31 +312,33 @@ proc totally_reduce { term } {
 }
 
  
-add_rule {(__c1 * x) + (__c2 * x)}      -> {(__c1 + __c2) * x}
-add_rule {(__c1 * x) - (__c2 * x)}      -> {(__c1 - __c2) * x}
-add_rule {__c1 * (__t1 + __t2)}         -> {__c1 * __t1 + __c1 * __t2}
-add_rule {__c1 * (__t1 - __t2)}         -> {__c1 * __t1 - __c1 * __t2}
-add_rule {x / x}                        -> 1
-add_rule {x * x**__c1}                  -> {x**(__c1 + 1)}
-add_rule {x**__c1 * x**__c2}            -> {x**(__c1 + __c2)}
-add_rule {x * x}                        -> {x**2}
-add_rule {__t1 * 0}                     -> 0
-add_rule {0 * __t1}                     -> 0
-add_rule {diff(sin(x), x)}              -> {cos(x)}
-add_rule {diff(cos(x), x)}              -> {-1 * sin(x)}
-add_rule {diff(x**__c1, x)}             -> {__c1 * x**(__c1 - 1)}
-add_rule {diff(__c1, y)}                -> 0
-add_rule {diff(__a1 + __a2, x)}         -> {diff(__a1, x) + diff(__a2, x)}
-add_rule {diff(__a1 - __a2, x)}         -> {diff(__a1, x) - diff(__a2, x)}
-add_rule {diff(__t1 + __t2, x)}         -> {diff(__t1, x) + diff(__t2, x)}
-add_rule {diff(__t1 - __t2, x)}         -> {diff(__t1, x) - diff(__t2, x)}
-add_rule {diff(x, x)}                   -> 1
-add_rule {diff(__c1 * x, x)}            -> __c1
-add_rule {diff(x * __c1, x)}            -> __c1
-add_rule {diff(__c1 * x**__c2, x)}      -> {__c1 * __c2 * x**(__c2 - 1)}
-add_rule {0 + __t1}                     -> __t1
-add_rule {0 - __t1}                     -> {-1 * (__t1)}
-add_rule {diff(__a1 * __a2, y)}         -> {diff(__a1, y) * __a2 + __a1 * diff(__a2, y)}
+add_rule    (__c1 * x) + (__c2 * x)      -> (__c1 + __c2) * x
+add_rule    (__c1 * x) - (__c2 * x)      -> (__c1 - __c2) * x
+add_rule    __c1 * (__t1 + __t2)         -> __c1 * __t1 + __c1 * __t2
+add_rule    __c1 * (__t1 - __t2)         -> __c1 * __t1 - __c1 * __t2
+add_rule    x / x                        -> 1
+add_rule    x * x**__c1                  -> x**(__c1 + 1)
+add_rule    x**__c1 * x**__c2            -> x**(__c1 + __c2)
+add_rule    x * x                        -> x**2
+add_rule    __t1 * 0                     -> 0
+add_rule    0 * __t1                     -> 0
+add_rule    diff(sin(x), x)              -> cos(x)
+add_rule    diff(cos(x), x)              -> -1 * sin(x)
+add_rule    diff(x**__c1, x)             -> __c1 * x**(__c1 - 1)
+add_rule    diff(__c1, y)                -> 0
+add_rule    diff(__a1 + __a2, x)         -> diff(__a1, x) + diff(__a2, x)
+add_rule    diff(__a1 - __a2, x)         -> diff(__a1, x) - diff(__a2, x)
+add_rule    diff(__t1 + __t2, x)         -> diff(__t1, x) + diff(__t2, x)
+add_rule    diff(__t1 - __t2, x)         -> diff(__t1, x) - diff(__t2, x)
+add_rule    diff(x, x)                   -> 1
+add_rule    diff(__c1 * x, x)            -> __c1
+add_rule    diff(x * __c1, x)            -> __c1
+add_rule    diff(__c1 * x**__c2, x)      -> __c1 * __c2 * x**(__c2 - 1)
+add_rule    0 + __t1                     -> __t1
+add_rule    0 - __t1                     -> -1 * (__t1)
+add_rule    0 * __t1                     -> 0
+add_rule    0 * __a1                     -> 0
+add_rule    diff(__a1 * __a2, y)         -> diff(__a1, y) * __a2 + __a1 * diff(__a2, y)
 
 
 # interact
