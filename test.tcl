@@ -8,7 +8,7 @@ lappend terms "y / y"
 lappend terms "h * h**4"
 lappend terms "g**2 * g**3"
 lappend terms "i * i"
-lappend terms "15 * (7 - x * y)"
+lappend terms "15 * (7 - x)"
 lappend terms "diff(10, x)"
 lappend terms "diff(sin(y), y)"
 lappend terms "diff(cos(h), h)"
@@ -22,6 +22,7 @@ lappend terms "diff(6 * z**5, z)"
 lappend terms "diff(x, y)"
 lappend terms "diff(9 - x, y)"
 lappend terms "diff(22 * x, y)"
+lappend terms "diff(7 - y, y)"
 
 foreach t $terms {
     puts [format "%-30s ---> %-30s" $t [totally_reduce $t]]

@@ -49,8 +49,8 @@ namespace eval expression {
        >=        {   80                 2        left        gte    }
        ==        {   90                 2        left        equ    }
        !=        {   90                 2        left        neq    }
-        &        {  100                 2        left        band   }
         ^        {  110                 2        left        bxor   }
+        &        {  100                 2        left        band   }
         |        {  120                 2        left        bor    }
        &&        {  130                 2        left        land   }
        ||        {  140                 2        left        lor    }
@@ -162,6 +162,11 @@ namespace eval expression {
                set tok [pull input]
                # puts "got tok: $tok"
 
+               if { $tok eq "expr" } {
+                   push operands "\[expr {[pull input]}\]"
+                   continue
+               }
+
                if { $tok eq ";" } {
                    while { [top operator] ne {} } {
                        push operands [{*}$prefix [name [set op [pop operator]]] {*}[pop operands [arity $op]]]
@@ -197,10 +202,11 @@ namespace eval expression {
                         && [assoc $tok] eq "right" ) } {
 
                    if { $tok eq "(" || $tok eq {[} } {
-                       if { $tok eq {[} || ($prv ne {} && ![prec $prv]) } {
+                       if { ($prv ne {} && ![prec $prv]) } {
                            if { [next input] eq ")" }        { push parens 0                ; # Function call or Index
                            } else                         { push parens 1   }
-                       } else                                 { push parens "(" }        ; # Normal expression paren
+                       } elseif   { $tok eq "(" }                           { push parens "("        ; # Normal expression paren
+                       } else                               { push parens "[" }
                    } else {
                        if { [prec ${tok}u] && ($prv eq {} || $prv eq "," || $prv eq "(" || $prv eq {[}) } {
                            set tok ${tok}u
@@ -220,6 +226,10 @@ namespace eval expression {
                        pop operator
 
                        # puts "pop one"
+                       pop parens
+                    }
+                    "[" {                                                        ; # Close paren on normal expression paren
+                       pop operator
                        pop parens
                     }
                     default {                                                                ; # Function call, Index or comma

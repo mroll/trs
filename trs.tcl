@@ -1,5 +1,10 @@
 source expression.tcl
 
+proc wsplit {str sep} {
+  split [string map [list $sep \0] $str] \0
+}
+
+proc first { list } { lindex $list 0 }
 
 proc forindex { i list body } {
     set len [llength $list]
@@ -57,10 +62,9 @@ proc newvar { v i } { join [list $v $i] _ }
 
 proc group { v } {
     switch -regexp -matchvar m -- $v {
-        {^__c\d+$}     { return {(\d+|\d+\.\d+)} }
-        {^__t\d+$}     { return {({.*}|(?:\d+|\d+\.\d+)|\[a-zA-Z0-9\]+)} }
+        {^__c\d+$}     { return {(\-?(?:\d+|\d+\.\d+))} }
+        {^__t\d+$}     { return {({.*}|(?:\-?(?:\d+|\d+\.\d+))|[a-zA-Z0-9]+)} }
         {^__a\d+$}     { return (\[a-zA-Z0-9\]+) }
-        {^__f\d+$}     { return ([join $::functions |]) }
         {^[a-zA-Z]+$}  { return (\[a-zA-Z\]+) }
     }
 }
@@ -127,12 +131,18 @@ proc dollarize { varnames } {
     set pairs
 }
 
+proc constantterm { term } { expr { [llength $term] == 1 && [string is double [first $term]] } }
+
 proc rule { redex -> contractum } {
     lassign [make_regex $redex {} 1] pattern vars
 
     subst { { term } {
-            set match \[regexp {$pattern} \$term __r__ $vars\]
-            if { \$match } { subst {[string map [dollarize $vars] $contractum]} }
+                set match \[regexp {$pattern} \$term __r__ $vars\]
+                if { \$match } {
+                    set ret "[subst {[string map [dollarize $vars] $contractum]}]"
+                    if { \[constantterm \$ret\] } { concat \$ret
+                    } else { return \$ret }
+                }
             }
     }
 }
@@ -172,20 +182,13 @@ set rules {}
 #
 set tokens [expression::prep-tokens $expression::optable]
 
-# proc add_rule { redex -> contractum } {
-#     set redex_tree [expression::parse $redex $::tokens $expression::optable ident]
-#     set contractum_tree [expression::parse $contractum $::tokens $expression::optable ident]
-# 
-#     uplevel [subst -nocommands { lappend rules [rule {$redex_tree} -> {$contractum_tree}] }]
-# }
-
 proc add_rule { args } {
-    set fields [lmap x [split $args ->] { concat $x }]
-    if { [llength $fields] ne 3 } { return }
+    set fields [lmap x [wsplit $args ->] { concat $x }]
+    if { [llength $fields] ne 2 } { puts "bad rule: $fields"; return }
 
-    foreach { redex -> contractum } $fields { }
+    foreach { redex contractum } $fields { }
 
-    set redex_tree [expression::parse $redex $::tokens $expression::optable ident]
+    set redex_tree      [expression::parse $redex $::tokens $expression::optable ident]
     set contractum_tree [expression::parse $contractum $::tokens $expression::optable ident]
 
     uplevel [subst -nocommands { lappend rules [rule {$redex_tree} -> {$contractum_tree}] }]
@@ -194,18 +197,33 @@ proc add_rule { args } {
 proc interact { } {
     set input [prompt "> "]
     while { ! [string equal $input quit] } {
-        set term [expression::parse $input $::tokens $expression::optable ident]
-        if { [valid $term] } {
+        # set term [parse [eval-exp $input]]
+        if { [valid $input] } {
             # puts "expression tree: $term"
-            puts [totally_reduce $term]
+            puts [totally_reduce $input]
         }
         set input [prompt "> "]
     }
 }
 
+proc cmd? { x } {
+    expr { [lsearch [namespace inscope evaluate { info procs }] $x] != -1 }
+}
+
+proc cmds-only? { args } {
+    # puts $args
+    foreach cmd $args {
+        if { [llength $cmd] > 1 } { set test [lindex $cmd 0]
+        } else { set test $cmd }
+
+        if { ! [cmd? $test] } { return 0 }
+    }
+    return 1
+}
+
 proc numsonly? { args } {
     foreach x $args {
-        if { ! [string is digit $x] } { return 0 }
+        if { ! [string is integer $x] } { return 0 }
     }
     return 1
 }
@@ -221,23 +239,6 @@ proc guard { args } {
     }
 
     return $guarded
-}
-
-proc parse { term } { expression::parse $term $::tokens $expression::optable ident }
-
-proc cmd? { x } {
-    expr { [lsearch [namespace inscope evaluate { info procs }] $x] != -1 }
-}
-
-proc cmds-only? { args } {
-    # puts $args
-    foreach cmd $args {
-        if { [llength $cmd] > 1 } { set test [lindex $cmd 0]
-        } else { set test $cmd }
-
-        if { ! [cmd? $test] } { return 0 }
-    }
-    return 1
 }
 
 namespace eval evaluate {
@@ -311,11 +312,11 @@ proc totally_reduce { term } {
     }
 }
 
+proc parse { term } { expression::parse $term $::tokens $expression::optable ident }
+
  
 add_rule    (__c1 * x) + (__c2 * x)      -> (__c1 + __c2) * x
 add_rule    (__c1 * x) - (__c2 * x)      -> (__c1 - __c2) * x
-add_rule    __c1 * (__t1 + __t2)         -> __c1 * __t1 + __c1 * __t2
-add_rule    __c1 * (__t1 - __t2)         -> __c1 * __t1 - __c1 * __t2
 add_rule    x / x                        -> 1
 add_rule    x * x**__c1                  -> x**(__c1 + 1)
 add_rule    x**__c1 * x**__c2            -> x**(__c1 + __c2)
@@ -323,13 +324,8 @@ add_rule    x * x                        -> x**2
 add_rule    __t1 * 0                     -> 0
 add_rule    0 * __t1                     -> 0
 add_rule    diff(sin(x), x)              -> cos(x)
-add_rule    diff(cos(x), x)              -> -1 * sin(x)
 add_rule    diff(x**__c1, x)             -> __c1 * x**(__c1 - 1)
 add_rule    diff(__c1, y)                -> 0
-add_rule    diff(__a1 + __a2, x)         -> diff(__a1, x) + diff(__a2, x)
-add_rule    diff(__a1 - __a2, x)         -> diff(__a1, x) - diff(__a2, x)
-add_rule    diff(__t1 + __t2, x)         -> diff(__t1, x) + diff(__t2, x)
-add_rule    diff(__t1 - __t2, x)         -> diff(__t1, x) - diff(__t2, x)
 add_rule    diff(x, x)                   -> 1
 add_rule    diff(__c1 * x, x)            -> __c1
 add_rule    diff(x * __c1, x)            -> __c1
@@ -338,7 +334,19 @@ add_rule    0 + __t1                     -> __t1
 add_rule    0 - __t1                     -> -1 * (__t1)
 add_rule    0 * __t1                     -> 0
 add_rule    0 * __a1                     -> 0
-add_rule    diff(__a1 * __a2, y)         -> diff(__a1, y) * __a2 + __a1 * diff(__a2, y)
+add_rule    diff(__t1 * __t2, y)         -> diff(__t1, y) * __t2 + __t1 * diff(__t2, y)
+add_rule    diff(cos(x), x)              -> -1 * sin(x)
+add_rule    diff(__a1, y)                -> 0
+add_rule    diff(__t1 + __t2, x)         -> diff(__t1, x) + diff(__t2, x)
+add_rule    diff(__t1 - __t2, x)         -> diff(__t1, x) - diff(__t2, x)
+add_rule    __c1 * (__t1 - __t2)         -> __c1 * __t1 - __c1 * __t2
+add_rule    __c1 * (__t1 + __t2)         -> __c1 * __t1 + __c1 * __t2
 
+
+add_rule    __c1 + __c2                  -> {[expr { __c1 + __c2 }]}
+add_rule    __c1 - __c2                  -> {[expr { __c1 - __c2 }]}
+add_rule    __c1 * __c2                  -> {[expr { __c1 * __c2 }]}
+add_rule    __c1 / __c2                  -> {[expr { __c1 / __c2 }]}
+add_rule    __c1 * 1                     -> __c1
 
 # interact
