@@ -25,5 +25,5 @@ lappend terms "diff(22 * x, y)"
 lappend terms "diff(7 - y, y)"
 
 foreach t $terms {
-    puts [format "%-30s ---> %-30s" $t [totally_reduce $t]]
+    puts [format "%-30s ---> %-30s" $t [eval-exp [simplify [parse $t] $::rules]]]
 }

@@ -203,9 +203,9 @@ namespace eval expression {
 
                    if { $tok eq "(" || $tok eq {[} } {
                        if { ($prv ne {} && ![prec $prv]) } {
-                           if { [next input] eq ")" }        { push parens 0                ; # Function call or Index
-                           } else                         { push parens 1   }
-                       } elseif   { $tok eq "(" }                           { push parens "("        ; # Normal expression paren
+                           if { [next input] eq ")" }           { push parens 0          ; # Function call or Index
+                           } else                               { push parens 1   }
+                       } elseif   { $tok eq "(" }           { push parens "("        ; # Normal expression paren
                        } else                               { push parens "[" }
                    } else {
                        if { [prec ${tok}u] && ($prv eq {} || $prv eq "," || $prv eq "(" || $prv eq {[}) } {
