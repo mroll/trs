@@ -58,16 +58,16 @@ diff(7 - y, y)                 ---> -1 * 1
 
 ## usage
 
-rewriter.tcl can be run as an interactive prompt, or as a one-off
-program to simplify an expression. Passing the -e option followed
-by an expression will print out the simplification of the expression
-and exit. Passing no options will drop you into an interactive prompt
-where you can input infix expressions and see their simplifications.
+rewriter.tcl can be run as an interactive prompt, or as a one-off program to
+simplify an expression. Passing the -e option followed by an expression will
+print out the simplification of the expression and exit. Passing the -i option
+will drop you into an interactive prompt where you can input infix expressions
+and see their simplifications.
 
     matt@fitz ~/c/t/trs> ./rewriter.tcl -e 'diff(x*7 + 20*x, x)'
     27.0
 
-    matt@fitz ~/c/t/trs> ./rewriter.tcl
+    matt@fitz ~/c/t/trs> ./rewriter.tcl -i
     > 7 + 8*x
     7 + 8 * x
     > 

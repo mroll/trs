@@ -225,10 +225,11 @@ proc eval-exp { exp } {
 proc parse { term } { expression::parse $term $::tokens $expression::optable ident }
 
 namespace eval evaluate {
-    proc add { t1 t2 } { join [list [eval $t1] [eval $t2]] " + " }
-    proc sub { t1 t2 } { join [list [eval $t1] [eval $t2]] " - " }
-    proc mul { t1 t2 } { join [list [eval $t1] [eval $t2]] " * " }
-    proc div { t1 t2 } { join [list [eval $t1] [eval $t2]] " / " }
+    set binops { add + sub - mul * div / }
+    foreach { name symb } $binops {
+        set body [subst -nocommands { join [list [eval \$t1] [eval \$t2]] " $symb " }]
+        proc $name { t1 t2 } $body
+    }
 
     proc usub { t } {
         if { [nums-only? $t] } { expr { -$t }
@@ -289,6 +290,7 @@ set usage "usage: ./rewriter.tcl \[-e expression\]"
 if { $argc } {
     switch [lindex $argv 0] {
         -e { puts [eval-exp [trs::simplify [parse [lindex $argv 1]] $::rules]] }
+        -i { trs::interact }
         default { puts $usage }
     }
-} else { trs::interact }
+}
