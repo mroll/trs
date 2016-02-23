@@ -270,3 +270,9 @@ namespace eval expression {
        pop operands
    }
 }
+
+# Process the operator table to create the string map table that suffices
+# for the lexical analyzer.
+#
+set tokens [expression::prep-tokens $expression::optable]
+

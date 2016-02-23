@@ -22,3 +22,48 @@ proc union { a b } {
 }
 
 proc newvar { v i } { join [list $v $i] _ }
+
+proc interleave {args} {
+    if {[llength $args] == 0} {return {}}
+
+    set data {}
+    set idx  0
+    set head {}
+    set body "lappend data"
+
+    foreach arg $args {
+        lappend head v$idx $arg
+        append  body " \$v$idx"
+        incr idx
+    }
+
+    eval foreach $head [list $body]
+    return $data
+} ;# AMG
+
+# return a mapping to pass to [string map] that will turn plain
+# variable names into dollar references.
+proc dollarize { varnames string } {
+    set pairs {}
+    foreach name $varnames {
+        lappend pairs $name
+        lappend pairs $$name
+    }
+
+    string map $pairs $string
+}
+
+proc nums-only? { args } {
+    foreach x $args {
+        if { ! [string is integer $x] } { return 0 }
+    }
+    return 1
+}
+
+proc prompt { msg } {
+    puts -nonewline $msg
+    flush stdout
+    gets stdin
+}
+
+proc ident { args }       { set args }

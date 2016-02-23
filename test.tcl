@@ -26,5 +26,5 @@ lappend terms "diff(7 - y, y)"
 lappend terms "0 + (10 - 7 + x -y)"
 
 foreach t $terms {
-    puts [format "%-30s ---> %-30s" $t [eval-exp [trs::simplify [parse $t] $::rules]]]
+    puts [format "%-30s ---> %-30s" $t [trs::eval-exp [trs::simplify [parse $t] $::rules]]]
 }
