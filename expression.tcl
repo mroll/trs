@@ -160,10 +160,9 @@ namespace eval expression {
        try {
            while { [llength $input] } {
                set tok [pull input]
-               # puts "got tok: $tok"
 
-               if { $tok eq "expr" } {
-                   push operands "\[expr {[pull input]}\]"
+               if { [regexp {^ \[ expr {(.*)} \]} $tok _ operation] } {
+                   push operands "\[expr {$operation}\]"
                    continue
                }
 

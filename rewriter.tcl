@@ -6,17 +6,97 @@ namespace eval trs {
     variable evalcmd
     variable parseproc
 
+    proc match-tree { inst symb symboltable } {
+        set n [llength $symb]
+
+        for {set i 0} {$i < $n} {incr i} {
+            set subexpr [lindex $inst $i]
+            set rulexpr [lindex $symb $i]
+
+            set instclass [inst2class $subexpr]
+            set ruleclass [symb2class $rulexpr]
+
+            if { [llength $rulexpr] > 1 } {
+                set recursivetable [match-tree $subexpr $rulexpr $symboltable]
+
+                if { $recursivetable eq "" } {
+                    return {}
+                } else {
+                    set symboltable [dict merge $symboltable $recursivetable]
+                }
+            } elseif { $instclass eq $ruleclass } {
+                if { [group $rulexpr] } {
+                    set exists [dict keys $symboltable $rulexpr]
+                    if { $exists ne "" } {
+                        set prev [dict get $symboltable $rulexpr]
+                        if { $prev ne $subexpr } {
+                            return {}
+                        }
+                    }
+
+                    dict set symboltable $rulexpr [list $subexpr]
+                }
+            } else {
+                return {}
+            }
+        }
+
+        return $symboltable
+    }
+
+    proc group { symb } { variable ops; expr { [lsearch $ops $symb] == -1 } }
+
+    proc inst2class { inst } {
+        if { [string is double $inst] } {
+            return constant
+        } elseif { [string is alpha $inst] } {
+            switch -regexp -- $inst {
+                {^mul$}          { return MulOp }
+                {^div$}          { return DivOp }
+                {^add$}          { return AddOp }
+                {^sub$}          { return SubOp }
+                {^pow$}          { return PowOp }
+                {^diff$}         { return DiffOp }
+                {^[a-zA-Z]+$}    { return variable }
+                {^[a-zA-Z0-9]+$} { return atom }
+                default          { return nomatch }
+            }
+        } elseif { [string is list $inst] } {
+            return subexpr
+        } else {
+            return nomatch
+        }
+    }
+
+    proc symb2class { symb } {
+        if { [llength $symb] > 1 } {
+            return subexpr
+        }
+        switch -regexp -- $symb {
+            {^@c\d+$}      { return constant }
+            {^@t\d+$}      { return subexpr  }
+            {^@a\d+$}      { return atom     }
+            {^mul$}        { return MulOp }
+            {^div$}        { return DivOp }
+            {^add$}        { return AddOp }
+            {^sub$}        { return SubOp }
+            {^pow$}        { return PowOp }
+            {^diff$}       { return DiffOp }
+            {^[a-zA-Z]+$}  { return variable }
+            default        { return nomatch  }
+        }
+    }
+
+
     # set up the lambda expression that is customized for each rule.
     # names prefixed with '@' are specific to each rule.
     variable ruleproc { { term } {
-        set match [regexp {^@pattern} $term __r__ @vars]
-        if { $match } {
-            set newterm [subst {@res}]
-            if { [llength $newterm] == 1 } {
-                lindex $newterm 0
-            } else {
-                return $newterm
-            }
+        set symboltable [trs::match-tree $term {@redex} [dict create]]
+        if { $symboltable ne "" } {
+
+            set result [subst -novariables [string map $symboltable {@contractum}]]
+            return $result
+            # return [string map $symboltable {@contractum}]
         }
     }}
 
@@ -33,7 +113,7 @@ namespace eval trs {
         set redex_tree      [parse $redex]
         set contractum_tree [parse $contractum]
 
-        uplevel [subst -nocommands { lappend rules [trs::rule {$redex_tree} -> {$contractum_tree}] }]
+        uplevel [subst -nocommands { lappend rules [trs::rule-v2 {$redex_tree} -> {$contractum_tree}] }]
     }}
 
     proc parse { term } { variable parseproc; $parseproc $term }
@@ -47,99 +127,38 @@ namespace eval trs {
         }
     }
 
-    proc recurse-reduce { term rules lvl } {
-        # puts "[string repeat " " [expr { $lvl * 4 }]]reducing $term"
-        # puts "[string repeat " " [expr { $lvl * 4 }]]--------------"
-        for {set i 1} {$i <= [llength $term]} {incr i} {
-            set contractum [reduce $term $rules]
+    proc preorder-reduce { term rules } {
+        if { [llength $term] == 1 } { return $term }
 
-            if { [llength $contractum] } {
-                # puts "[string repeat " " [expr { $lvl * 4 + 4 }]]replaced $term -> $contractum"
-                return $contractum
-            }
+        for {set i 0} {$i < [llength $term]} {incr i} {
+            set current [lindex $term $i]
+            set reduction [preorder-reduce $current $rules]
 
-            set redex [lindex $term $i]
-            if { [term? $redex] } {
-                set contractum [recurse-reduce $redex $rules [expr { $lvl + 1 }]]
-            }
+            lset term $i $reduction
+            if { $reduction ne $current } { set i 0 }
+        } 
 
-            if { [llength $contractum] } {
-                set redex $term
-                lset term $i [concat $contractum]
-                # puts "[string repeat " " [expr { $lvl * 4 + 4 }]]replaced $redex -> $term"
-            }
+        set reduction [reduce $term $rules]
+
+        if { $reduction ne "" } {
+            return $reduction
+        } else {
+            return $term
         }
-
-        # puts ""
-        set term
-    }
-
-    proc group { v } {
-        switch -regexp -matchvar m -- $v {
-            {^__c\d+$}     { return {(\-?(?:\d+|\d+\.\d+))} }
-            {^__t\d+$}     { return {({.*}|(?:\-?(?:\d+|\d+\.\d+))|[a-zA-Z0-9]+)} }
-            {^__a\d+$}     { return (\[a-zA-Z0-9\]+) }
-            {^[a-zA-Z]+$}  { return (\[a-zA-Z\]+) }
-        }
-    }
-
-    proc operator? { v } { variable ops; regexp [join [lmap op $ops {subst {^$op\$}}] |] $v }
-    proc term?     { v } { expr { [llength $v] > 1 } }
-    proc var?      { v } { regexp {^(?:__)?\w+$}   $v }
-    proc constant? { v } { regexp {^[0-9]+$} $v }
-
-    proc rule-matcher { redex } {
-        set regex $redex
-        set groups {}
-        set vars   {}
-
-        forindex i $regex {
-            set t [lindex $regex $i]
-            if { [operator? $t] || [constant? $t] } {
-                lset    regex $i %s
-                lappend groups $t
-            } elseif { [term? $t] } {
-                set  drill [rule-matcher $t]
-                lset regex $i [lindex $drill 0]
-                set  vars  [union $vars [lindex $drill 1]]
-            } elseif { [var?  $t] } {
-                lset regex $i %s
-                set  backtrack [lsearch $vars $t]
-
-                # backtrack will be index of the var in vars list, or -1 if not found.
-                # If it exists, set the group to be the backtrack+1 expr of the existing
-                # var.
-                #
-                if { $backtrack != -1 } {
-                    lappend groups "\\[expr {$backtrack+1}]"
-                } else {
-                    lappend groups [group $t]
-                    lappend vars   $t
-                }
-            }
-        }
-
-        list [format "$regex" {*}$groups] $vars
     }
 
     proc rule { redex -> contractum } {
         variable ruleproc
-
-        lassign [rule-matcher $redex] pattern vars
-
-        set names {@pattern @vars @res}
-        set vals  [list $pattern $vars [dollarize $vars $contractum]]
-
-        string map [interleave $names $vals] $ruleproc
+        return [string map [list @redex $redex @contractum $contractum] $ruleproc]
     }
 
     proc simplify { term rules } {
         set old $term
-        set new [recurse-reduce $term $rules 1]
+        set new [preorder-reduce $term $rules]
 
         while { $old ne $new } {
             set old $new
-            set new [recurse-reduce $new $rules 1]
+            set new [preorder-reduce $new $rules]
         }
 
         set new
@@ -167,7 +186,7 @@ namespace eval trs {
         proc ::add-rule {*}[string map "rules $list_name" $adderproc]
     }
 
-    proc valid    { expression } { expr { ! [string equal $expression ""] } }
+    proc valid    { expression } { expr { $expression ne "" } }
     proc eval-exp { exp        } { variable evalcmd; $evalcmd $exp }
 }
 
