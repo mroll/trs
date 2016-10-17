@@ -113,7 +113,7 @@ namespace eval trs {
         set redex_tree      [parse $redex]
         set contractum_tree [parse $contractum]
 
-        uplevel [subst -nocommands { lappend rules [trs::rule-v2 {$redex_tree} -> {$contractum_tree}] }]
+        uplevel [subst -nocommands { lappend rules [trs::rule {$redex_tree} -> {$contractum_tree}] }]
     }}
 
     proc parse { term } { variable parseproc; $parseproc $term }
@@ -127,15 +127,20 @@ namespace eval trs {
         }
     }
 
-    proc preorder-reduce { term rules } {
+    proc walk-and-reduce { term rules } {
         if { [llength $term] == 1 } { return $term }
 
+        puts "reducing $term"
+        puts "--------------"
         for {set i 0} {$i < [llength $term]} {incr i} {
             set current [lindex $term $i]
-            set reduction [preorder-reduce $current $rules]
+            set reduction [walk-and-reduce $current $rules]
 
             lset term $i $reduction
-            if { $reduction ne $current } { set i 0 }
+            if { $reduction ne $current } {
+                puts "found reduction: $current -> $reduction"
+                set i 0
+            }
         } 
 
         set reduction [reduce $term $rules]
@@ -154,11 +159,11 @@ namespace eval trs {
 
     proc simplify { term rules } {
         set old $term
-        set new [preorder-reduce $term $rules]
+        set new [walk-and-reduce $term $rules]
 
         while { $old ne $new } {
             set old $new
-            set new [preorder-reduce $new $rules]
+            set new [walk-and-reduce $new $rules]
         }
 
         set new
@@ -185,6 +190,8 @@ namespace eval trs {
         uplevel [list set $list_name {}]
         proc ::add-rule {*}[string map "rules $list_name" $adderproc]
     }
+
+    proc term? { t } { expr { [llength $t] > 1 || [llength [lindex $t 0]] > 1 } }
 
     proc valid    { expression } { expr { $expression ne "" } }
     proc eval-exp { exp        } { variable evalcmd; $evalcmd $exp }
